@@ -1,0 +1,373 @@
+---
+title: "Projet"
+output: word_document
+---
+
+Projet Analyse multidimensionnelle et clustering 
+Perenon Clément, Regazzetti Léa, Triki Arthur 
+Master 1 Informatique 
+Année universitaire 2020-2021
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Présentation, import et nettoyage du fichier de données
+
+Le jeu de données provient du site Kaggle, une plateforme organisant des compétitions en data science. Le lien du dataset est le suivant : 
+https://www.kaggle.com/karangadiya/fifa19
+Dans ce jeu de données, on retrouve des informations sur différents joueurs de football.
+
+```{r}
+library("FactoMineR")
+library("factoextra")
+library(ggplot2)
+#install.packages("ggdendro")
+library(ggdendro)
+library(dendextend)
+joueurs =  read.csv("data.csv",sep=",",header = TRUE, row.names = 1, encoding = "UTF-8")
+str(joueurs)
+```
+
+Le fichier se compose de 18207 observations, qui sont les joueurs de football. Toutefois, certains noms sont présents plusieurs fois dans le fichier de données, nous allons donc éliminer les joueurs en doublons en ne gardant que la première observation rencontrée dans le jeu de données pour les joueurs apparaissant plusieurs fois.
+
+```{r}
+doublons = which(duplicated(joueurs$Name))
+data = joueurs[-doublons,]
+```
+
+Par ailleurs, dans le cadre de ce projet, il n'est pas nécessaire d'avoir autant d'observations, nous allons donc réduire notre jeu de données à 1500 observations choisies aléatoirement. Mais pour permettre de reproduire notre travail, nous générons les mêmes données aléatoires.
+
+```{r}
+set.seed(10)
+x = sample(1:dim(data)[1],1500)
+donnees = data[x,]
+```
+
+Puis ne garder que les joueurs n'ayant pas de valeurs manquantes.
+```{r}
+donnees = donnees[which(complete.cases(donnees)),]
+```
+
+Nous pouvons alors indiquer que la deuxième colonne du fichier de données, qui contient les noms des joueurs, servira pour les étiquettes des lignes.
+De plus, de nombreuses variables ne sont pas nécessaires pour nos analyses, nous allons donc les enlever de notre jeu de données.
+
+```{r}
+rownames(donnees) = donnees[,2]
+d = donnees[,-c(1,2,4,6,10,28:53)]
+str(d)
+```
+Ainsi, notre fichier de données contient 1491 individus statistiques qui sont les joueurs de football.
+
+
+# ACP
+Dans un premier temps, on souhaite savoir si dans notre fichier de données il y a des joueurs qui se ressemblent. Pour cela, nous allons étudier différents attributs sur les joueurs, notés sur une échelle de 100. On pourra alors se demander si certains critères sont corrélés.
+
+## Réalisation de l'ACP
+```{r}
+d.active <- d[, 23:56]
+res.pca <- PCA(d.active,scale.unit=FALSE,graph = FALSE)
+```
+
+
+## Calcul des valeurs propres
+```{r}
+eig.val = get_eigenvalue(res.pca) 
+head(eig.val)
+sum(eig.val[,1]) #Inertie totale
+fviz_eig(res.pca,addlabels = TRUE, ylim = c(0, 70))
+```
+Nous sommes dans le cas d'une ACP non normée donc l'inertie moyenne est I/p. Dans ce cas c'est égal à 9922.103/34 = 291.82. Donc d'après la règle de Kaiser, on pourrait garder les 4 premiers axes car leur valeurs propres sont supérieures à 291.82.
+
+Nous allons retenir et analyser les deux premiers axes qui restituent une majorité de l'information du jeu de données.
+
+## Analyse du premier axe
+
+### Analyse des individus
+
+```{r}
+ind<-get_pca_ind(res.pca)
+print(ind)
+coord<-ind$coord[,1]
+contrib<-ind$contrib[,1]
+cos2<-ind$cos2[,1]
+display<-cbind(coord,contrib,cos2)
+```
+
+Etant donné le grand nombre de joueurs dans le jeu de données, nous n'affichons que les 30 joueurs les mieux représentés sur l'axe 1.
+```{r}
+display_cos2 <- display[,3]
+display_cos2 <- sort(display_cos2, decreasing = TRUE)
+head(display_cos2,n=30L)
+```
+La qualité de représentation est d'autant plus grande que le cos2 est proche de 1, ce qui correspond à la situation où la distance projetée est fidèle à la distance initiale.
+
+Ensuite, on va extraire les 30 joueurs qui contribuent le mieux à la formation de l'axe
+```{r}
+display_contrib <- display[,2]
+display_contrib <- sort(display_contrib, decreasing = TRUE)
+head(display_contrib,n=30L)
+```
+Plus la contribution d'un individu sur un axe est proche de 1, plus il contribue à la formation de l'axe. Nous avons donc ici les 30 joueurs qui contribuent le plus à la formation de l'axe 1.
+
+Ainsi, G. Viscarra, R. Ferguson, L. Grill caractérisent le côté négatif de l'axe 1 (ce sont des gardiens de but). Ces joueurs sont notés de la même façon, en comparaison à ceux qui caractérisent le côté positif de l'axe 1.
+
+
+```{r}
+#fviz_cos2(res.pca, choice = "ind")
+#fviz_contrib(res.pca, choice = "ind", axes = 1)
+```
+
+On constate que les graphiques sont illisibles et qu'il y a beaucoup trop de joueurs pour faire une analyse sensée. On va donc se tourner vers une analyse des variables.
+
+### Analyse des variables
+```{r}
+var <- get_pca_var(res.pca) 
+coord<-var$coord[,1]
+contrib<-var$contrib[,1]
+cos2<-var$cos2[,1]
+display<-cbind(coord,contrib,cos2)
+display
+```
+
+
+Meilleure est la contribution, plus sa position sera très à droite ou très à gauche et plus leur contribution dans la construction du graphique est importante. Crossing et finishing, BallControl, Stamina, ShortPassing sont représentés à droite de l'axe 1. GKGiving, GKKiking, GKPositioning et GKReflexes ont des coordonnées négatives, donc elles seront positionnées à gauche de l'axe 1. Elles sont caractérisées par les individus qui sont moins bien notés sur ces variables.
+
+Plus le cos2 est élevé, plus la qualité de représentation est haute. Ainsi, BallControl, Dribbling et ShortPassing ont une excellente qualité de représentation sur l'axe 1.
+
+## Analyse du second axe
+
+### Analyse des individus
+```{r}
+ind2<-get_pca_ind(res.pca)
+print(ind2)
+coord<-ind$coord[,2]
+contrib<-ind$contrib[,2]
+cos2<-ind$cos2[,2]
+display_2<-cbind(coord,contrib,cos2)
+```
+
+Comme précédemment, on va extraire les 30 joueurs les mieux représentés sur l'axe 2.
+```{r}
+display_cos2_2 <- display_2[,3]
+display_cos2_2 <- sort(display_cos2_2, decreasing = TRUE)
+head(display_cos2_2,n=30L)
+```
+
+Et les 30 joueurs qui contribuent le mieux à la formation de l'axe :
+```{r}
+display_contrib_2 <- display_2[,2]
+display_contrib_2 <- sort(display_contrib_2, decreasing = TRUE)
+head(display_contrib_2,n=30L)
+```
+
+```{r}
+#fviz_cos2(res.pca, choice = "ind")
+#fviz_contrib(res.pca, choice = "ind", axes = 1)
+```
+
+Le côté négatif de l'axe 2 est caractérisé par des joueurs tels que Rúben Dias, W. Orban, J. Pearce (des défenseurs).
+Mais nous constatons de la même manière qu'il est peu intéressant d'analyser les individus. On va donc analyser les variables.
+
+
+### Analyse des variables
+
+```{r}
+var <- get_pca_var(res.pca) 
+coord<-var$coord[,2]
+contrib<-var$contrib[,2]
+cos2<-var$cos2[,2]
+display<-cbind(coord,contrib,cos2)
+display
+```
+
+On peut voir que les variables StandingTackle, SlidingTackle, Interceptions et marking contribuent fortement à la construction de l'axe 2. Ils sont également au alentour de 0.6 de cos2, donc ils sont relativement bien représentés sur l'axe 2.
+Ainsi, le côté négatif de l'axe 2 est caractérisé par ces variables.
+
+
+## Analyse générale
+
+On peut visualiser les cos2 des variables en fonctions des 5 dimensions.
+```{r}
+library("corrplot")
+corrplot(var$cos2, is.corr=FALSE)
+```
+Dans la première dimensions les variables qui ont un bon cos2 sont donc bien Dribbling, BallControl ressortent bien. On peut avoir une vue un peu plus globale avec ce graphique.
+
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+fviz_pca_ind(res.pca, col.ind = "cos2",
+              gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             title="Joueur de FIFA19 en fonction de leur qualité de représentation (cos2)",
+             repel = TRUE)
+```
+
+```{r}
+fviz_pca_ind (res.pca, pointsize = "contrib",
+pointshape = 21, fill = "#E7B800",title="Les joueurs de FIFA19 en fonction de leur contribution (contrib)",
+repel = TRUE)
+```
+
+
+Enfin, le graphique des variables sur les deux premiers axes factoriels.
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+fviz_pca_var(res.pca, title="Critères de notation des joueurs", repel=TRUE)
+```
+
+Ainsi, nous avons pu voir que certains critères étaient corrélés, notamment ceux concernant le gardien de but, et qu'ils s'opposaient aux autres critères, ce qui est logique. Concernant les joueurs, les gardiens caractérisent le côté négatif de l'axe 1. Et les défenseurs caractérisent le côté négatif de l'axe 2.
+
+
+# AFC
+Maintenant, nous allons nous intéresser à un autre type de question. Est-ce que la position sur le terrain a un lien avec la morphologie ?
+La position sur le terrain correspond à la variable "Position" et la morphologie à la variable "Body.Type".
+Nous allons tout d'abord transformer les variables correspondantes.
+```{r}
+d$Position=as.factor(d$Position)
+levels(d$Position)
+d$Body.Type=as.factor(d$Body.Type)
+levels(d$Body.Type)
+```
+
+## Construction du tableau de contingence
+```{r}
+contingence = table(d$Position,d$Body.Type)
+contingence
+```
+
+## Test d'indépendance du Chi²
+```{r message=FALSE,warning=FALSE}
+chisq <- chisq.test(contingence) 
+chisq
+
+```
+La pvalue est de 5.532e-05, ainsi, au seuil de 5% on rejette l'hypothèse d'indépendance. Les deux variables sont liées. Les joueurs n'ont pas la même position sur le terrain selon leur morphologie.
+
+## Réalisation de l'AFC
+```{r message=FALSE,warning=FALSE}
+res.ca <- CA(contingence, graph = FALSE)  #calcul de l'AFC
+```
+
+## Choix du nombre d'axes
+```{r message=FALSE,warning=FALSE}
+eig.val <- get_eigenvalue(res.ca) 
+eig.val
+fviz_eig(res.ca, addlabels = TRUE, ylim = c(0, 100))
+```
+
+Etant donné que le nombre de modalités de la variable morphologie est de 3, nous n'obtenons que 2 valeurs propres, ainsi ce jeu de données ne permet pas de réellement appliquer la démarche visant à déterminer le nombre d’axes à interpréter.
+Nous allons donc interpréter les deux axes.
+
+## Analyse des profils lignes
+```{r message=FALSE,warning=FALSE}
+row<-get_ca_row(res.ca)
+corrplot(row$cos2, is.corr = FALSE)
+corrplot(row$contrib, is.corr=FALSE)
+```
+Le profil des "attaquants droits" (RS : right striker) et "attaquants gauches" (LS : left striker) caractérisent le côté positif de l'axe 1. 
+Le profil des "ailiers droits" (RW : Right winger) caractérise le côté négatif de l'axe 1.
+De ce fait, la distribution de la morphologie des "ailiers droits" n'est pas la même que celle des attaquants.
+
+Le côté négatif de l'axe 2 est caractérisé par le profil des "centres arrières gauches" (LCB : left center back) tandis que les "ailiers arrières gauches" (LWB : left winger back) caractérisent le côté positif de l'axe 2.
+
+
+La représentation graphique des profils lignes sur le 1e plan factoriel est la suivante : 
+```{r message=FALSE,warning=FALSE}
+fviz_ca_row (res.ca, col.row = "cos2",
+             title ="Profils lignes selon leur cosinus²",
+             gradient.cols = c ("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE)
+```
+ou bien
+```{r message=FALSE,warning=FALSE}
+fviz_ca_row(res.ca, pointsize = "contrib", 
+            title="Profils lignes selon leur contribution",
+            repel = TRUE)
+
+```
+
+## Analyse des profils colonnes
+
+```{r message=FALSE,warning=FALSE}
+col<-get_ca_col(res.ca)
+corrplot(col$cos2, is.corr = FALSE)
+corrplot(col$contrib, is.corr=FALSE)
+```
+Le profil des "trapus" (stocky) caractérise le côté positif de l'axe 1 par opposition au profil "normal" qui caractérise le côté négatif de l'axe 1. 
+Cela signifie que les trapus n'ont pas la même position sur le terrain que les joueurs ayant une morphologie normale.
+Le côté positif de l'axe 2 est caractérisé par le profil des "minces" (lean).
+
+
+La représentation graphique des profils colonnes sur le 1e plan factoriel est la suivante : 
+```{r message=FALSE,warning=FALSE}
+fviz_ca_col(res.ca, col.col = "cos2",
+             title ="Profils colonnes selon leur cosinus²",
+             gradient.cols = c ("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE)
+```
+ou bien
+```{r message=FALSE,warning=FALSE}
+fviz_ca_col(res.ca, pointsize = "contrib", 
+            title="Profils colonnes selon leur contribution",
+            repel = TRUE)
+
+```
+
+Pour terminer, nous pouvons représenter simultanément les profils lignes et les profils colonnes.
+```{r}
+fviz_ca_biplot (res.ca, repel = TRUE)
+```
+
+Ainsi, nous avons pu voir selon leur position sur le terrain, les joueurs n'avaient pas la même morphologie.
+
+
+# Clustering
+Pour terminer, nous allons réaliser une classification des joueurs en fonction des attributs que l'on avait utilisés lors de l'ACP. Comme précédemment, il n'est pas nécessaire de centrer et réduire les données puisqu'elles sont toutes dans la même unité.
+
+## Matrice des distances euclidiennes entre les individus
+```{r message=FALSE, warning=FALSE}
+distances<-dist(d.active)
+#print(distances)
+```
+
+## Détermination du nombre de classe à prendre par la méthode de l'inertie inter-classe
+```{r message=FALSE, warning=FALSE}
+inertie.expl <- rep(0,times=15)
+for (k in 2:15){
+  clus <- kmeans(d.active,centers=k,nstart=5)
+  inertie.expl[k] <- clus$betweenss/clus$totss
+}
+plot(1:15,inertie.expl,type="b",xlab="Nb. de groupes",ylab="% inertie expliquée") 
+```
+A partir de k = 4 classes, l'adjonction d'un groupe supplémentaire n'augmente pas assez la part d'inertie expliquée par la partition. On choisit k=4.
+
+
+### CAH avec le critère de Ward
+```{r message=FALSE, warning=FALSE}
+res.cahward<-hclust(distances,method="ward.D") #réalisation de la CAH
+ggdendrogram(res.cahward)
+ggplot(color_branches(res.cahward, k = 4), labels = FALSE, rect = TRUE)
+groupes.cah<-cutree(res.cahward,k=4)
+#print(groupes.cah)
+```
+Au vu du nombre important de joueurs, un dendrogramme ne semble pas adapté ou du moins pas optimal.
+
+
+
+### Méthode des k-MEANS
+```{r message=FALSE, warning=FALSE}
+res.kmeans<-kmeans(d.active,centers=4,nstart=5)
+print(res.kmeans)
+res.kmeans$cluster
+fviz_cluster(res.kmeans,d.active,
+             palette = c("red", "blue", "orange","green","purple"), 
+             geom = "point",
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+             )
+```
+Nous pouvons remarquer qu'un cluster de joueurs semble se détacher des autres.
+
+
+
